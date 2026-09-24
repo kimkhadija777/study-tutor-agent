@@ -1,14 +1,33 @@
 import ast
 import operator as op
+
 import streamlit as st
 
-from crewai import Agent, Task, Crew, LLM
+# ---------------------------------------------------------
+# IMPORTANT:
+# CrewAI currently has a cache_breakpoint issue with
+# non-Anthropic providers such as Groq.
+#
+# This disables the problematic cache marker before
+# CrewAI sends messages to Groq.
+# ---------------------------------------------------------
+
+try:
+    import crewai.llms.cache as crewai_cache
+
+    crewai_cache.mark_cache_breakpoint = lambda message: message
+
+except Exception:
+    pass
+
+
+from crewai import Agent, Crew, Task, LLM
 from crewai.tools import tool
 
 
-# ============================================================
-# PAGE CONFIGURATION
-# ============================================================
+# =========================================================
+# STREAMLIT PAGE CONFIG
+# =========================================================
 
 st.set_page_config(
     page_title="Study Tutor Agent",
@@ -17,18 +36,22 @@ st.set_page_config(
 )
 
 
-# ============================================================
-# CUSTOM TOOLS
-# ============================================================
+# =========================================================
+# CUSTOM TOOL 1: CALCULATOR
+# =========================================================
 
 @tool("Calculator")
 def calculator(expression: str) -> str:
     """
-    Safely calculate basic mathematical expressions.
-    Supports +, -, *, /, %, ** and parentheses.
+    Safely calculate a basic mathematical expression.
+
+    Examples:
+    10 + 5
+    20 * 4
+    (100 / 5) + 7
     """
 
-    allowed_operators = {
+    operators = {
         ast.Add: op.add,
         ast.Sub: op.sub,
         ast.Mult: op.mul,
@@ -39,51 +62,65 @@ def calculator(expression: str) -> str:
         ast.UAdd: op.pos,
     }
 
-    def evaluate(node):
+    def calculate(node):
 
         if isinstance(node, ast.Expression):
-            return evaluate(node.body)
+            return calculate(node.body)
 
         if isinstance(node, ast.Constant):
+
             if isinstance(node.value, (int, float)):
                 return node.value
+
             raise ValueError("Only numbers are allowed.")
 
         if isinstance(node, ast.BinOp):
+
             operator_type = type(node.op)
 
-            if operator_type not in allowed_operators:
-                raise ValueError("Operator not allowed.")
+            if operator_type not in operators:
+                raise ValueError("Operator is not allowed.")
 
-            left = evaluate(node.left)
-            right = evaluate(node.right)
+            left = calculate(node.left)
+            right = calculate(node.right)
 
-            return allowed_operators[operator_type](left, right)
+            return operators[operator_type](left, right)
 
         if isinstance(node, ast.UnaryOp):
+
             operator_type = type(node.op)
 
-            if operator_type not in allowed_operators:
-                raise ValueError("Operator not allowed.")
+            if operator_type not in operators:
+                raise ValueError("Operator is not allowed.")
 
-            return allowed_operators[operator_type](
-                evaluate(node.operand)
+            return operators[operator_type](
+                calculate(node.operand)
             )
 
-        raise ValueError("Invalid mathematical expression.")
+        raise ValueError("Invalid expression.")
 
     try:
-        tree = ast.parse(expression, mode="eval")
-        result = evaluate(tree)
+
+        tree = ast.parse(
+            expression,
+            mode="eval"
+        )
+
+        result = calculate(tree)
 
         return f"Calculation result: {result}"
 
     except Exception:
+
         return (
             "I could not calculate that expression. "
-            "Please use a simple mathematical expression."
+            "Please provide a simple mathematical expression."
         )
 
+
+# =========================================================
+# CUSTOM TOOL 2: STUDY PLANNER
+# =========================================================
 
 @tool("Study Planner")
 def study_planner(topic: str) -> str:
@@ -92,20 +129,22 @@ def study_planner(topic: str) -> str:
     """
 
     return f"""
-Create a study plan for the topic: {topic}
+Study topic: {topic}
 
-The plan should contain:
-1. Learn the basic concept
-2. Understand an example
-3. Practice
-4. Review mistakes
-5. Quick revision
+Suggested learning sequence:
+
+1. Understand the basic concept
+2. Learn the important terminology
+3. Study a simple example
+4. Practice with questions
+5. Review mistakes
+6. Revise the key points
 """
 
 
-# ============================================================
+# =========================================================
 # MEMORY
-# ============================================================
+# =========================================================
 
 def initialize_memory():
 
@@ -125,19 +164,15 @@ def initialize_memory():
         st.session_state.topic = ""
 
 
-def clear_memory():
-
-    st.session_state.messages = []
-
-
 def get_conversation_memory():
 
-    messages = st.session_state.messages
+    if not st.session_state.messages:
 
-    if not messages:
-        return "No previous conversation."
+        return "There is no previous conversation."
 
-    recent_messages = messages[-10:]
+
+    # Keep only the most recent messages.
+    recent_messages = st.session_state.messages[-10:]
 
     conversation = []
 
@@ -153,20 +188,34 @@ def get_conversation_memory():
     return "\n".join(conversation)
 
 
-# ============================================================
-# CREATE STUDY TUTOR AGENT
-# ============================================================
+def clear_memory():
 
-def create_tutor_agent():
+    st.session_state.messages = []
 
-    groq_api_key = st.secrets["GROQ_API_KEY"]
 
-    llm = LLM(
+# =========================================================
+# CREATE LLM
+# =========================================================
+
+def create_llm():
+
+    api_key = st.secrets["GROQ_API_KEY"]
+
+    return LLM(
         model="groq/openai/gpt-oss-120b",
-        api_key=groq_api_key,
+        api_key=api_key,
         temperature=0.3,
         reasoning_effort="medium"
     )
+
+
+# =========================================================
+# CREATE STUDY TUTOR AGENT
+# =========================================================
+
+def create_tutor_agent():
+
+    llm = create_llm()
 
     tutor = Agent(
 
@@ -174,17 +223,17 @@ def create_tutor_agent():
 
         goal=(
             "Help students understand academic concepts clearly, "
-            "practice what they learn, identify misunderstandings, "
-            "and become more confident learners."
+            "practice effectively, solve problems, and improve "
+            "their understanding."
         ),
 
         backstory=(
-            "You are a patient and friendly university study tutor. "
-            "You explain difficult concepts in simple language while "
-            "maintaining university-level accuracy. "
+            "You are a friendly and patient university study tutor. "
+            "You teach difficult concepts in simple English while "
+            "maintaining academic accuracy. "
             "You use examples, step-by-step explanations, "
             "practice questions, and constructive feedback. "
-            "You never intentionally overwhelm the student."
+            "You adapt explanations to the student's level."
         ),
 
         llm=llm,
@@ -202,9 +251,9 @@ def create_tutor_agent():
     return tutor
 
 
-# ============================================================
-# RUN TUTOR
-# ============================================================
+# =========================================================
+# RUN STUDY TUTOR
+# =========================================================
 
 def ask_tutor(question):
 
@@ -212,64 +261,115 @@ def ask_tutor(question):
 
     conversation = get_conversation_memory()
 
-    context = f"""
-Student information:
+    student_name = (
+        st.session_state.student_name
+        if st.session_state.student_name
+        else "Not provided"
+    )
+
+    subject = st.session_state.subject
+
+    level = st.session_state.level
+
+    topic = (
+        st.session_state.topic
+        if st.session_state.topic
+        else "Not provided"
+    )
+
+
+    task_description = f"""
+You are tutoring a university student.
+
+STUDENT INFORMATION
+-------------------
 
 Name:
-{st.session_state.student_name or "Not provided"}
+{student_name}
 
 Subject:
-{st.session_state.subject}
-
-Current topic:
-{st.session_state.topic or "Not provided"}
+{subject}
 
 Learning level:
-{st.session_state.level}
+{level}
+
+Current topic:
+{topic}
 
 
-Recent conversation:
+RECENT CONVERSATION
+-------------------
 
 {conversation}
-"""
 
-    task = Task(
 
-        description=f"""
-You are helping a student learn.
-
-{context}
-
-Current student request:
+CURRENT STUDENT REQUEST
+-----------------------
 
 {question}
 
 
-Follow these rules:
+TEACHING RULES
+--------------
 
 1. Answer the student's actual question.
-2. Use simple and clear language.
-3. Keep the explanation appropriate for a university student.
+
+2. Use simple and clear English.
+
+3. Keep the explanation appropriate for a
+   university student.
+
 4. Break difficult concepts into smaller parts.
-5. Give an example when useful.
-6. If a calculation is required, use the Calculator tool.
-7. If the student asks for a study plan, use the Study Planner tool.
-8. If the student asks for practice questions, create useful
-   questions and do not immediately reveal answers unless requested.
-9. If the student gives an answer, evaluate it and explain mistakes.
-10. Remember the recent conversation when answering follow-up questions.
-11. Do not claim that you remember information that is not present
-    in the provided conversation.
-12. Be encouraging but focus on teaching rather than simply giving
-    an answer.
-""",
+
+5. Give examples when useful.
+
+6. If mathematics or arithmetic is required,
+   use the Calculator tool.
+
+7. If the student requests a study plan,
+   use the Study Planner tool.
+
+8. If the student asks for practice questions,
+   create useful questions.
+
+9. If the student gives an answer,
+   check it carefully and explain mistakes.
+
+10. Use the recent conversation to understand
+    follow-up questions.
+
+11. Do not claim to remember information that
+    is not present in the provided conversation.
+
+12. Do not unnecessarily repeat the same
+    explanation.
+
+13. Be encouraging, but focus on teaching.
+
+14. Use headings, bullet points, and examples
+    when they improve readability.
+
+15. For difficult topics, finish with a short
+    "Key Takeaways" section.
+
+16. If the student's question is unclear,
+    make a reasonable interpretation and
+    explain what you understood.
+"""
+
+
+    task = Task(
+
+        description=task_description,
 
         expected_output=(
-            "A clear, accurate, student-friendly tutoring response."
+            "A clear, accurate, beginner-friendly "
+            "university-level tutoring response."
         ),
 
         agent=tutor
     )
+
 
     crew = Crew(
 
@@ -280,31 +380,37 @@ Follow these rules:
         verbose=False
     )
 
+
     result = crew.kickoff()
 
     return str(result)
 
 
-# ============================================================
-# INITIALIZE MEMORY
-# ============================================================
+# =========================================================
+# INITIALIZE APP MEMORY
+# =========================================================
 
 initialize_memory()
 
 
-# ============================================================
+# =========================================================
 # SIDEBAR
-# ============================================================
+# =========================================================
 
 with st.sidebar:
 
     st.title("🎓 Study Tutor")
 
-    st.markdown(
-        "Personal AI tutor for learning and practice."
+    st.caption(
+        "Your personal AI learning assistant"
     )
 
     st.divider()
+
+
+    # -----------------------------------------------------
+    # STUDENT INFORMATION
+    # -----------------------------------------------------
 
     st.subheader("👩‍🎓 Student")
 
@@ -314,10 +420,16 @@ with st.sidebar:
         placeholder="Enter your name"
     )
 
+
+    # -----------------------------------------------------
+    # STUDY SETTINGS
+    # -----------------------------------------------------
+
     st.subheader("📚 Study Settings")
 
     st.session_state.subject = st.selectbox(
         "Subject",
+
         [
             "Computer Science",
             "Data Structures",
@@ -327,12 +439,15 @@ with st.sidebar:
             "Computer Networks",
             "Software Engineering",
             "Database Systems",
+            "HTML & Web Development",
             "Other"
         ]
     )
 
+
     st.session_state.level = st.selectbox(
         "Learning level",
+
         [
             "Beginner",
             "Intermediate",
@@ -340,13 +455,20 @@ with st.sidebar:
         ]
     )
 
+
     st.session_state.topic = st.text_input(
         "Current topic",
         value=st.session_state.topic,
-        placeholder="e.g. Stack"
+        placeholder="Example: Stack"
     )
 
+
     st.divider()
+
+
+    # -----------------------------------------------------
+    # CLEAR CHAT
+    # -----------------------------------------------------
 
     if st.button(
         "🗑️ Clear Conversation",
@@ -354,42 +476,87 @@ with st.sidebar:
     ):
 
         clear_memory()
+
         st.rerun()
+
 
     st.divider()
 
     st.caption(
-        "Powered by CrewAI + Groq GPT-OSS 120B"
+        "CrewAI • Groq • GPT-OSS 120B"
     )
 
 
-# ============================================================
-# MAIN PAGE
-# ============================================================
+# =========================================================
+# MAIN HEADER
+# =========================================================
 
 st.title("🎓 Study Tutor Agent")
 
 st.markdown(
-    "Learn concepts, practice questions, solve problems, "
-    "and study step by step with your AI tutor."
+    """
+Learn concepts, practice questions, solve problems,
+and study step by step with your AI tutor.
+"""
 )
 
 
-# ============================================================
-# WELCOME MESSAGE
-# ============================================================
+# =========================================================
+# QUICK START
+# =========================================================
 
 if not st.session_state.messages:
 
     st.info(
-        "👋 Welcome! Tell me what you want to learn. "
-        "For example: 'Explain stacks with a simple example.'"
+        "👋 Welcome! Start by asking me about any topic "
+        "you want to learn."
     )
 
 
-# ============================================================
+    st.markdown("### 💡 Try one of these")
+
+    col1, col2, col3 = st.columns(3)
+
+
+    with col1:
+
+        st.markdown(
+            """
+            **📚 Learn**
+
+            Explain Stack in Data Structures
+            with a simple example.
+            """
+        )
+
+
+    with col2:
+
+        st.markdown(
+            """
+            **🧠 Practice**
+
+            Give me 5 MCQs about queues
+            without showing the answers.
+            """
+        )
+
+
+    with col3:
+
+        st.markdown(
+            """
+            **📅 Plan**
+
+            Create a 7-day study plan
+            for learning Data Structures.
+            """
+        )
+
+
+# =========================================================
 # DISPLAY CHAT HISTORY
-# ============================================================
+# =========================================================
 
 for message in st.session_state.messages:
 
@@ -398,9 +565,9 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 
-# ============================================================
-# CHAT INPUT
-# ============================================================
+# =========================================================
+# USER INPUT
+# =========================================================
 
 question = st.chat_input(
     "Ask your Study Tutor..."
@@ -409,7 +576,10 @@ question = st.chat_input(
 
 if question:
 
-    # Save user message
+    # -----------------------------------------------------
+    # SAVE USER MESSAGE
+    # -----------------------------------------------------
+
     st.session_state.messages.append(
         {
             "role": "user",
@@ -417,13 +587,20 @@ if question:
         }
     )
 
-    # Display user message
+
+    # -----------------------------------------------------
+    # DISPLAY USER MESSAGE
+    # -----------------------------------------------------
+
     with st.chat_message("user"):
 
         st.markdown(question)
 
 
-    # Generate tutor response
+    # -----------------------------------------------------
+    # GENERATE AI RESPONSE
+    # -----------------------------------------------------
+
     with st.chat_message("assistant"):
 
         with st.spinner(
@@ -436,22 +613,36 @@ if question:
 
                 st.markdown(answer)
 
+
             except Exception as error:
 
-                answer = (
-                    "⚠️ I couldn't process that request.\n\n"
-                    "Please check that your Groq API key is correctly "
-                    "configured in Streamlit Secrets.\n\n"
-                    f"Technical error: `{error}`"
+                st.error(
+                    "Something went wrong while contacting "
+                    "the Study Tutor."
                 )
 
-                st.error(answer)
+                st.caption(
+                    "Please check your Streamlit Secret and "
+                    "the application logs."
+                )
+
+                st.code(
+                    str(error)
+                )
+
+                answer = (
+                    "I couldn't generate a response because "
+                    "the AI service returned an error."
+                )
 
 
-    # Save assistant message
+    # -----------------------------------------------------
+    # SAVE AI MESSAGE
+    # -----------------------------------------------------
+
     st.session_state.messages.append(
         {
             "role": "assistant",
             "content": answer
         }
-      )
+            )
