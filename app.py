@@ -1,7 +1,6 @@
 import streamlit as st
 import ast
 import operator
-from datetime import datetime
 
 from crewai import Agent, Task, Crew, LLM
 from crewai.tools import BaseTool
@@ -15,7 +14,7 @@ st.set_page_config(
     page_title="Study Tutor Agent",
     page_icon="🎓",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 
@@ -23,68 +22,68 @@ st.set_page_config(
 # CUSTOM CSS
 # =========================================================
 
-st.markdown("""
-<style>
+st.markdown(
+    """
+    <style>
 
-.main-title {
-    font-size: 42px;
-    font-weight: 700;
-    margin-bottom: 5px;
-}
+    .main-title {
+        font-size: 42px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
 
-.subtitle {
-    font-size: 18px;
-    color: #666;
-    margin-bottom: 25px;
-}
+    .subtitle {
+        font-size: 18px;
+        color: #666666;
+        margin-bottom: 25px;
+    }
 
-.welcome-card {
-    padding: 35px;
-    border-radius: 20px;
-    background: linear-gradient(135deg, #f7f9ff, #eef3ff);
-    border: 1px solid #dce4ff;
-    margin-bottom: 25px;
-}
+    .welcome-card {
+        padding: 35px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, #f7f9ff, #eef3ff);
+        border: 1px solid #dce4ff;
+        margin-bottom: 25px;
+    }
 
-.feature-card {
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid #e5e7eb;
-    background: white;
-    min-height: 150px;
-}
+    .feature-card {
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #e5e7eb;
+        background: white;
+        min-height: 150px;
+    }
 
-.mode-card {
-    padding: 15px;
-    border-radius: 14px;
-    background: #f8f9fa;
-    border: 1px solid #e5e7eb;
-    margin-bottom: 10px;
-}
+    .mode-card {
+        padding: 15px;
+        border-radius: 14px;
+        background: #f8f9fa;
+        border: 1px solid #e5e7eb;
+        margin-bottom: 10px;
+    }
 
-.small-text {
-    color: #666;
-    font-size: 14px;
-}
+    .profile-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #f5f7ff;
+        margin-bottom: 15px;
+    }
 
-.profile-box {
-    padding: 15px;
-    border-radius: 12px;
-    background: #f5f7ff;
-    margin-bottom: 15px;
-}
-
-</style>
-""", unsafe_allow_html=True)
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =========================================================
-# CREWAI / LITELLM CACHE COMPATIBILITY FIX
+# CREWAI / LITELLM COMPATIBILITY FIX
 # =========================================================
 
 try:
     import crewai.llms.cache as crewai_cache
+
     crewai_cache.mark_cache_breakpoint = lambda message: message
+
 except Exception:
     pass
 
@@ -93,26 +92,39 @@ except Exception:
 # SESSION STATE
 # =========================================================
 
-defaults = {
-    "setup_complete": False,
-    "student_name": "",
-    "subject_option": "Computer Science",
-    "custom_subject": "",
-    "current_topic": "",
-    "learning_level": "Beginner",
-    "mode": "Learn",
-    "messages": [],
-    "previous_subject": "",
-    "previous_topic": "",
-}
+if "setup_complete" not in st.session_state:
+    st.session_state.setup_complete = False
 
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+if "student_name" not in st.session_state:
+    st.session_state.student_name = ""
+
+if "subject_option" not in st.session_state:
+    st.session_state.subject_option = "Computer Science"
+
+if "custom_subject" not in st.session_state:
+    st.session_state.custom_subject = ""
+
+if "current_topic" not in st.session_state:
+    st.session_state.current_topic = ""
+
+if "learning_level" not in st.session_state:
+    st.session_state.learning_level = "Beginner"
+
+if "mode" not in st.session_state:
+    st.session_state.mode = "Learn"
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "previous_subject" not in st.session_state:
+    st.session_state.previous_subject = ""
+
+if "previous_topic" not in st.session_state:
+    st.session_state.previous_topic = ""
 
 
 # =========================================================
-# SUBJECT LIST
+# SUBJECTS
 # =========================================================
 
 SUBJECTS = [
@@ -149,9 +161,6 @@ allowed_operators = {
 
 
 def safe_calculate(expression):
-    """
-    Safely calculate basic mathematical expressions.
-    """
 
     try:
         tree = ast.parse(expression, mode="eval")
@@ -159,11 +168,14 @@ def safe_calculate(expression):
         def evaluate(node):
 
             if isinstance(node, ast.Constant):
+
                 if isinstance(node.value, (int, float)):
                     return node.value
+
                 raise ValueError("Invalid number")
 
             if isinstance(node, ast.BinOp):
+
                 left = evaluate(node.left)
                 right = evaluate(node.right)
 
@@ -175,6 +187,7 @@ def safe_calculate(expression):
                 return operation(left, right)
 
             if isinstance(node, ast.UnaryOp):
+
                 value = evaluate(node.operand)
 
                 operation = allowed_operators.get(type(node.op))
@@ -188,8 +201,8 @@ def safe_calculate(expression):
 
         return evaluate(tree.body)
 
-    except Exception as e:
-        return f"Error: {str(e)}"
+    except Exception as error:
+        return f"Error: {error}"
 
 
 # =========================================================
@@ -197,14 +210,18 @@ def safe_calculate(expression):
 # =========================================================
 
 class CalculatorTool(BaseTool):
+
     name: str = "Calculator"
+
     description: str = (
         "Use this tool for mathematical calculations. "
         "Input should be a simple mathematical expression."
     )
 
     def _run(self, expression: str) -> str:
+
         result = safe_calculate(expression)
+
         return str(result)
 
 
@@ -216,7 +233,9 @@ calculator = CalculatorTool()
 # =========================================================
 
 class StudyPlannerTool(BaseTool):
+
     name: str = "Study Planner"
+
     description: str = (
         "Create a structured study plan based on subject, "
         "topics, number of days, and available study time."
@@ -227,7 +246,7 @@ class StudyPlannerTool(BaseTool):
         subject: str,
         topics: str,
         days: int,
-        hours_per_day: float
+        hours_per_day: float,
     ) -> str:
 
         topic_list = [
@@ -246,7 +265,7 @@ class StudyPlannerTool(BaseTool):
             topic = topic_list[(day - 1) % len(topic_list)]
 
             plan.append(
-                f"Day {day}: {topic} — "
+                f"Day {day}: {topic} - "
                 f"{hours_per_day} hour(s)"
             )
 
@@ -257,7 +276,7 @@ study_planner = StudyPlannerTool()
 
 
 # =========================================================
-# GET CURRENT SUBJECT
+# CURRENT SUBJECT
 # =========================================================
 
 def get_subject():
@@ -283,10 +302,12 @@ def create_llm():
     api_key = st.secrets.get("GROQ_API_KEY")
 
     if not api_key:
+
         st.error(
             "GROQ_API_KEY was not found. "
             "Please add it in Streamlit Secrets."
         )
+
         st.stop()
 
     return LLM(
@@ -320,7 +341,7 @@ def create_tutor_agent():
         ),
         tools=[
             calculator,
-            study_planner
+            study_planner,
         ],
         llm=llm,
         allow_delegation=False,
@@ -336,9 +357,9 @@ def create_tutor_agent():
 
 def get_mode_instructions(mode):
 
-    instructions = {
+    if mode == "Learn":
 
-        "Learn": """
+        return """
 You are in LEARN mode.
 
 Teach the student clearly and step-by-step.
@@ -353,9 +374,11 @@ Use:
 - A short summary at the end
 
 Do not make the explanation unnecessarily complicated.
-""",
+"""
 
-        "Practice": """
+    if mode == "Practice":
+
+        return """
 You are in PRACTICE mode.
 
 Help the student actively practice.
@@ -367,13 +390,15 @@ Give:
 - Gradually increasing difficulty
 
 If the student asks for questions without answers,
-DO NOT reveal the answers immediately.
+do not reveal the answers immediately.
 
 Give hints when requested.
 After the student attempts an answer, explain the solution.
-""",
+"""
 
-        "Quiz": """
+    if mode == "Quiz":
+
+        return """
 You are in QUIZ mode.
 
 Act like an interactive tutor quiz.
@@ -384,10 +409,9 @@ Rules:
 - Wait for the student's answer.
 - Then tell them whether it is correct.
 - Explain why.
-- Keep track of the quiz progress when possible.
-""",
+"""
 
-        "Study Plan": """
+    return """
 You are in STUDY PLAN mode.
 
 Create realistic and manageable study plans.
@@ -400,6 +424,7 @@ Consider:
 - Number of days
 
 Divide work into daily tasks.
+
 Include:
 - Learning
 - Practice
@@ -408,9 +433,6 @@ Include:
 
 Do not create an unrealistic workload.
 """
-    }
-
-    return instructions.get(mode, instructions["Learn"])
 
 
 # =========================================================
@@ -440,6 +462,7 @@ def ask_tutor(question):
 You are the student's personal AI study tutor.
 
 STUDENT PROFILE
+
 Name: {st.session_state.student_name}
 Subject: {subject}
 Current Topic: {st.session_state.current_topic}
@@ -447,25 +470,28 @@ Learning Level: {st.session_state.learning_level}
 Current Mode: {st.session_state.mode}
 
 MODE INSTRUCTIONS
+
 {mode_instructions}
 
 CONVERSATION HISTORY
+
 {history_text}
 
 STUDENT'S NEW QUESTION
+
 {question}
 
 IMPORTANT RULES
+
 1. Address the student's actual question.
 2. Match the student's learning level.
 3. Use simple English.
 4. Explain technical terms clearly.
 5. Use examples whenever useful.
-6. Do not pretend that you performed an action you did not perform.
-7. If mathematics is needed, use the calculator tool.
-8. If the student asks for a study plan, use the Study Planner tool when appropriate.
-9. Keep answers organized and readable.
-10. Encourage understanding rather than simply giving memorized answers.
+6. If mathematics is needed, use the calculator tool.
+7. If a study plan is needed, use the Study Planner tool when appropriate.
+8. Keep answers organized and readable.
+9. Encourage understanding rather than memorization.
 """
 
     task = Task(
@@ -489,21 +515,21 @@ IMPORTANT RULES
 
 
 # =========================================================
-# WELCOME / ONBOARDING SCREEN
+# WELCOME SCREEN
 # =========================================================
 
 def show_welcome_screen():
 
     st.markdown(
         '<div class="main-title">🎓 Study Tutor Agent</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     st.markdown(
         '<div class="subtitle">'
         'Your Personal AI Study Assistant'
         '</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     st.markdown(
@@ -513,13 +539,13 @@ def show_welcome_screen():
         <h2>👋 Welcome to Study Tutor!</h2>
 
         <p>
-        This app helps you learn, practice, take quizzes,
-        and create personalized study plans with an AI tutor.
+        Your AI study assistant can help you learn concepts,
+        practice questions, take quizzes, and create study plans.
         </p>
 
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     st.subheader("✨ What can you do here?")
@@ -527,6 +553,7 @@ def show_welcome_screen():
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -537,10 +564,11 @@ def show_welcome_screen():
             </p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col2:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -551,10 +579,11 @@ def show_welcome_screen():
             </p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col3:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -565,10 +594,11 @@ def show_welcome_screen():
             </p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     with col4:
+
         st.markdown(
             """
             <div class="feature-card">
@@ -579,7 +609,7 @@ def show_welcome_screen():
             </p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     st.markdown("---")
@@ -587,20 +617,20 @@ def show_welcome_screen():
     st.subheader("🚀 Let's personalize your learning")
 
     st.info(
-        "Fill in the information below. "
-        "You can change these settings later."
+        "Enter your information below. "
+        "You can change it later."
     )
 
     with st.form("onboarding_form"):
 
         name = st.text_input(
             "👩‍🎓 Your Name",
-            placeholder="Enter your name"
+            placeholder="Enter your name",
         )
 
         subject_option = st.selectbox(
             "📚 Choose Your Subject",
-            SUBJECTS
+            SUBJECTS,
         )
 
         custom_subject = ""
@@ -609,12 +639,12 @@ def show_welcome_screen():
 
             custom_subject = st.text_input(
                 "✏️ Enter Your Subject",
-                placeholder="e.g. Digital Logic Design"
+                placeholder="e.g. Digital Logic Design",
             )
 
         topic = st.text_input(
             "🎯 What are you studying?",
-            placeholder="e.g. Queue, HTML Forms, RSA, Python"
+            placeholder="e.g. Queue, HTML Forms, RSA, Python",
         )
 
         level = st.selectbox(
@@ -622,16 +652,14 @@ def show_welcome_screen():
             [
                 "Beginner",
                 "Intermediate",
-                "Advanced"
-            ]
+                "Advanced",
+            ],
         )
-
-        st.markdown("")
 
         start = st.form_submit_button(
             "🚀 Start Learning",
             use_container_width=True,
-            type="primary"
+            type="primary",
         )
 
         if start:
@@ -649,13 +677,17 @@ def show_welcome_screen():
 
             elif not topic.strip():
 
-                st.error("Please enter the topic you want to study.")
+                st.error(
+                    "Please enter the topic you want to study."
+                )
 
             else:
 
                 st.session_state.student_name = name.strip()
 
-                st.session_state.subject_option = subject_option
+                st.session_state.subject_option = (
+                    subject_option
+                )
 
                 st.session_state.custom_subject = (
                     custom_subject.strip()
@@ -679,7 +711,7 @@ def show_welcome_screen():
 
 
 # =========================================================
-# SHOW WELCOME IF FIRST OPEN
+# FIRST OPEN
 # =========================================================
 
 if not st.session_state.setup_complete:
@@ -690,14 +722,14 @@ if not st.session_state.setup_complete:
 
 
 # =========================================================
-# MAIN APP
+# CURRENT SUBJECT
 # =========================================================
 
 current_subject = get_subject()
 
 
 # =========================================================
-# DETECT SUBJECT/TOPIC CHANGE
+# DETECT TOPIC / SUBJECT CHANGE
 # =========================================================
 
 if (
@@ -724,14 +756,14 @@ if (
 
 st.markdown(
     '<div class="main-title">🎓 Study Tutor Agent</div>',
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 st.markdown(
     '<div class="subtitle">'
     'Your Personal AI Study Assistant'
     '</div>',
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 
@@ -739,15 +771,13 @@ st.markdown(
 # TOP NAVIGATION
 # =========================================================
 
-st.markdown("###")
-
 nav1, nav2, nav3, nav4 = st.columns(4)
 
 with nav1:
 
     if st.button(
         "📚 Learn",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         st.session_state.mode = "Learn"
@@ -758,7 +788,7 @@ with nav2:
 
     if st.button(
         "🧠 Practice",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         st.session_state.mode = "Practice"
@@ -769,7 +799,7 @@ with nav3:
 
     if st.button(
         "📝 Quiz",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         st.session_state.mode = "Quiz"
@@ -780,7 +810,7 @@ with nav4:
 
     if st.button(
         "📅 Study Plan",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         st.session_state.mode = "Study Plan"
@@ -809,82 +839,71 @@ with st.sidebar:
 
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     st.markdown("---")
 
     st.subheader("⚙️ Learning Setup")
 
+    subject_index = 0
+
+    if st.session_state.subject_option in SUBJECTS:
+
+        subject_index = SUBJECTS.index(
+            st.session_state.subject_option
+        )
+
     new_subject_option = st.selectbox(
         "📚 Subject",
         SUBJECTS,
-        index=(
-            SUBJECTS.index(st.session_state.subject_option)
-            if st.session_state.subject_option in SUBJECTS
-            else 0
-        ),
-        key="sidebar_subject"
+        index=subject_index,
+        key="sidebar_subject",
     )
+
+    new_custom_subject = ""
 
     if new_subject_option == "➕ Add Your Own Subject":
 
         new_custom_subject = st.text_input(
             "✏️ Custom Subject",
             value=st.session_state.custom_subject,
-            key="sidebar_custom_subject"
+            key="sidebar_custom_subject",
         )
-
-    else:
-
-        new_custom_subject = ""
 
     new_topic = st.text_input(
         "🎯 Current Topic",
         value=st.session_state.current_topic,
-        key="sidebar_topic"
+        key="sidebar_topic",
+    )
+
+    level_options = [
+        "Beginner",
+        "Intermediate",
+        "Advanced",
+    ]
+
+    level_index = level_options.index(
+        st.session_state.learning_level
     )
 
     new_level = st.selectbox(
         "📈 Learning Level",
-        [
-            "Beginner",
-            "Intermediate",
-            "Advanced"
-        ],
-        index=[
-            "Beginner",
-            "Intermediate",
-            "Advanced"
-        ].index(st.session_state.learning_level),
-        key="sidebar_level"
+        level_options,
+        index=level_index,
+        key="sidebar_level",
     )
+
+    # -----------------------------------------------------
+    # APPLY CHANGES
+    # -----------------------------------------------------
 
     if st.button(
         "💾 Apply Changes",
-        use_container_width=True
+        use_container_width=True,
     ):
 
         old_subject = get_subject()
+        old_topic = st.session_state.current_topic
 
-        st.session_state.subject_option = new_subject_option
-
-        st.session_state.custom_subject = new_custom_subject
-
-        st.session_state.current_topic = new_topic
-
-        st.session_state.learning_level = new_level
-
-        new_subject = get_subject()
-
-        if (
-            old_subject != new_subject
-            or st.session_state.previous_topic != new_topic
-        ):
-
-            st.session_state.messages = []
-
-        st.session_state.previous_subject = new_subject
-        st.session_state.previous_topic = new_topic
-
-        st.success("Learning
+        st.
