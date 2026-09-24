@@ -2,7 +2,7 @@ import ast
 import operator as op
 import streamlit as st
 
-from crewai import Agent, LLM
+from crewai import Agent, LLM, Task, Crew
 from crewai.tools import BaseTool
 
 
@@ -154,12 +154,12 @@ st.markdown("""
 # =========================================================
 
 defaults = {
-    "student_name": "Student",
+    "student_name": "Khadija",
     "subject": "Data Structures",
     "custom_subject": "",
-    "topic": "Binary Search Trees",
+    "topic": "Stack",
     "level": "Beginner",
-    # Chat histories for individual tabs
+    # Dedicated history per tab
     "chat_learn": [],
     "chat_practice": [],
     "chat_quiz": [],
@@ -296,7 +296,7 @@ def create_agent():
 
 
 # =========================================================
-# AI QUERY ENGINE
+# AI QUERY ENGINE (FIXED FOR CREWAI V1.x)
 # =========================================================
 
 def ask_tutor(user_input: str, section_mode: str, chat_history_key: str):
@@ -309,47 +309,60 @@ def ask_tutor(user_input: str, section_mode: str, chat_history_key: str):
     # Context Instructions
     instructions = {
         "Learn": (
-            "Teach the concept clearly from ground up. Provide conceptual summaries, "
-            "visual ASCII diagrams or formatted code, intuitive analogies, and key takeaways."
+            "Teach the concept clearly from the ground up. Provide conceptual summaries, "
+            "visual diagrams or code blocks, real-world analogies, and core takeaways."
         ),
         "Practice": (
             "Help the student practice step-by-step. Provide practice problems, hints, and feedback. "
-            "If the student requests problems only, do NOT immediately reveal solutions."
+            "Do NOT reveal complete solutions right away unless asked."
         ),
         "Quiz": (
-            "Act as an active quiz master. Ask engaging questions one by one or in small sets, "
-            "evaluate student answers accurately, grade them, and offer concise explanations."
+            "Act as a quiz tutor. Ask engaging questions one by one or in short sets, "
+            "evaluate student answers, and explain correct/incorrect answers clearly."
         ),
         "Study Plan": (
-            "Act as an academic planner. Produce structured study roadmaps, complete with "
-            "time estimates, daily targets, and spaced repetition/break strategies."
+            "Act as an academic planner. Produce structured study roadmaps with "
+            "time estimates, daily targets, and spaced-repetition schedules."
         )
     }
 
-    # Format historical context from session history
+    # Extract historical context from active session state
     history = st.session_state[chat_history_key][-6:]
     history_str = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history])
 
-    prompt = f"""
+    task_description = f"""
 Student Name: {student}
 Subject: {subject}
 Topic: {topic}
 Difficulty Level: {level}
 Current Mode: {section_mode}
 
-Mode Guidelines:
+Mode Directives:
 {instructions.get(section_mode, "Provide clear explanations.")}
 
-Recent Conversation History:
+Recent Conversation Context:
 {history_str}
 
-Current Request from {student}:
+User Question/Request:
 {user_input}
     """
 
     try:
-        response = tutor.execute_task(prompt)
-        return str(response)
+        # CrewAI v1.x Task execution fix
+        task = Task(
+            description=task_description,
+            expected_output="A helpful, well-formatted, and pedagogical explanation matching the current learning mode.",
+            agent=tutor
+        )
+
+        crew = Crew(
+            agents=[tutor],
+            tasks=[task],
+            verbose=False
+        )
+
+        result = crew.kickoff()
+        return str(result)
     except Exception as err:
         return f"⚡ **System Alert:** Unable to contact the AI tutor. Details: {err}"
 
@@ -363,7 +376,11 @@ with st.sidebar:
     
     st.session_state.student_name = st.text_input("👤 Student Name", value=st.session_state.student_name)
     
-    st.session_state.subject = st.selectbox("📚 Select Subject", SUBJECTS, index=SUBJECTS.index(st.session_state.subject) if st.session_state.subject in SUBJECTS else 0)
+    st.session_state.subject = st.selectbox(
+        "📚 Select Subject", 
+        SUBJECTS, 
+        index=SUBJECTS.index(st.session_state.subject) if st.session_state.subject in SUBJECTS else 0
+    )
     
     if st.session_state.subject == "➕ Add Your Own Subject":
         st.session_state.custom_subject = st.text_input("✏️ Custom Subject Name", value=st.session_state.custom_subject)
@@ -402,14 +419,17 @@ st.markdown(f"""
 # =========================================================
 
 def render_section(mode_label, history_key, default_prompt):
-    st.markdown(f"<div class='neon-box'><span class='badge'>{mode_label} Module</span> Active tracking for target topic: <b>{st.session_state.topic or 'General'}</b></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='neon-box'><span class='badge'>{mode_label} Module</span> Active tracking for target topic: <b>{st.session_state.topic or 'General'}</b></div>", 
+        unsafe_allow_html=True
+    )
 
-    # Render Existing History
+    # Render Active History
     for message in st.session_state[history_key]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # First-time auto prompt action helper
+    # First time initializer button
     if not st.session_state[history_key]:
         if st.button(f"🚀 Initialize {mode_label} Session", key=f"btn_init_{history_key}"):
             st.session_state[history_key].append({"role": "user", "content": default_prompt})
@@ -418,7 +438,7 @@ def render_section(mode_label, history_key, default_prompt):
                 st.session_state[history_key].append({"role": "assistant", "content": response})
             st.rerun()
 
-    # Chat Input Interface
+    # Chat Input Box
     if user_prompt := st.chat_input(f"Ask your {mode_label} Tutor...", key=f"input_{history_key}"):
         st.session_state[history_key].append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
